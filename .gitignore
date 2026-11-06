@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.vscode/
+
+# Local data and generated outputs
+data/
+schema_details.txt
+sql_analyst_graph.png

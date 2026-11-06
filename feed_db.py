@@ -1,13 +1,23 @@
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
+import argparse
 import os
 
 load_dotenv()
 
 PG_DB_URL = os.getenv("PG_DB_URL")
+if not PG_DB_URL:
+    raise ValueError("PG_DB_URL is not configured.")
 
 CSV_DIR = "data"
+
+parser = argparse.ArgumentParser(description="Load local CSV files into PostgreSQL.")
+parser.add_argument(
+    "--replace", action="store_true",
+    help="Delete existing rows in the five tables before loading CSV files.",
+)
+args = parser.parse_args()
 
 conn = psycopg2.connect(PG_DB_URL)
 cursor=conn.cursor()
@@ -199,19 +209,15 @@ print("Tables created successfully")
 # OPTIONAL: CLEAR EXISTING DATA
 # ============================================================
 
-# Uncomment this section if you want every execution
-# to completely reload the CSV data.
-
-
-cursor.execute("""
-    TRUNCATE TABLE
-        public.ratings,
-        public.payments,
-        public.rides,
-        public.vehicles,
-        public.users
-    CASCADE;
-""")
+if args.replace:
+    cursor.execute("""
+        TRUNCATE TABLE
+            public.ratings,
+            public.payments,
+            public.rides,
+            public.vehicles,
+            public.users;
+    """)
 
 
 

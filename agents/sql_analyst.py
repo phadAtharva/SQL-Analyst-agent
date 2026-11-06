@@ -2,29 +2,25 @@ from pathlib import Path
 import sys
 from langchain.messages import HumanMessage, AIMessage
 
-from websockets import State
-
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 
 from utils.llm_pick import pick_llm 
-from utils.database import Database
+from utils.database import Database, _validate_query
 from Models.schema import AgentSchema, JudgeSchema
 from langgraph.graph import StateGraph,START,END
 
 
 
 
-def curate_question(state : AgentSchema) -> AgentSchema:
-    # Implement the logic to curate the question based on the state
-    # For now, just return the state as is
+def curate_question(state: AgentSchema) -> dict:
+    if not state.user_question.strip() or len(state.user_question) > 4000:
+        raise ValueError("User question must contain between 1 and 4000 characters.")
     llm = pick_llm("low")
-    response=state.curated_ques=llm.invoke("Curate the question based on the current state: " + state.user_question).content
-    state.curated_ques = response
-    state.messages = state.messages + [HumanMessage(content=response)]
-    return state
+    response = llm.invoke("Curate the question based on the current state: " + state.user_question).content
+    return {"curated_ques": response, "messages": [HumanMessage(content=response)]}
 
-def prompt_query_context(state: AgentSchema) -> AgentSchema:
+def prompt_query_context(state: AgentSchema) -> dict:
 
     db = Database()
     schema_info = db.schema_details("public")
@@ -32,12 +28,13 @@ def prompt_query_context(state: AgentSchema) -> AgentSchema:
     You are an SQL analyst agent. Your task is to convert the user's natural language 
     query into Postgres SQL query that can be executed on the database. You are provided 
     with the user's original query and the schema details of the database, including
-    table names, column names, data types, and sample data for each table so that 
+    table names, column names, and data types for each table so that
     you can understand the structure of the database and generate an accurate SQL query.
     Unless user explicitly asks for specific number of rows, always limit the output to 10 rows.
     Note - Just generate the SQL query without any explanation or additional text because
     this query will be executed directly on the database. So, the output should be SQL
-    ready to be executed without any modifications.  
+    ready to be executed without any modifications. Do not include SQL comments
+    or a trailing semicolon.
     
     User's Original Query: {state.curated_ques}
 
@@ -47,20 +44,18 @@ def prompt_query_context(state: AgentSchema) -> AgentSchema:
     """    
     
    
-    state.prompt_query_context = prompt
-    return state
+    return {"prompt_query_context": prompt}
 
-def generate_sql_query(state: AgentSchema) -> AgentSchema:
+def generate_sql_query(state: AgentSchema) -> dict:
         
         prompt=state.prompt_query_context
     
         llm=pick_llm("medium")
         response = llm.invoke(prompt).content
     
-        state.generated_sql_query = response
-        return state
+        return {"generated_sql_query": _validate_query(response)}
 
-def is_safe_query(state: AgentSchema) -> AgentSchema:
+def is_safe_query(state: AgentSchema) -> dict:
 
     sql_query = state.generated_sql_query
 
@@ -78,27 +73,21 @@ def is_safe_query(state: AgentSchema) -> AgentSchema:
 
 
     response = llm_judge.invoke(prompt)
-    state.is_safe=response.is_safe
-    state.comments=response.comments
+    return {"is_safe": response.is_safe, "comments": response.comments}
 
-
-    return state
-
-def canceled_sql(state: AgentSchema) -> AgentSchema:
+def canceled_sql(state: AgentSchema) -> dict:
 
      comments=state.comments
-     state.final_answer = f"Query canceled due to safety concerns The reason provided by the judge is : {comments}"
-     state.messages= state.messages + [AIMessage(content=state.final_answer)]
-     return state
+     answer = f"Query canceled due to safety concerns The reason provided by the judge is : {comments}"
+     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
-def execute_sql(state: AgentSchema) -> AgentSchema:
+def execute_sql(state: AgentSchema) -> dict:
     db = Database()
     query = state.generated_sql_query
     result = db.execute_query(query)
-    state.sql_query_execution_result = result
-    return state
+    return {"sql_query_execution_result": result}
 
-def represent_final_answer(state: AgentSchema) -> AgentSchema:
+def represent_final_answer(state: AgentSchema) -> dict:
 
     execution_result = state.sql_query_execution_result
     curated_ques = state.curated_ques
@@ -112,11 +101,7 @@ def represent_final_answer(state: AgentSchema) -> AgentSchema:
     """
 
     response = llm.invoke(prompt).content
-    state.final_answer = response
-
-    state.messages= state.messages + [AIMessage(content=response)]
-
-    return state
+    return {"final_answer": response, "messages": [AIMessage(content=response)]}
 
 
 

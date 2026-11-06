@@ -1,17 +1,9 @@
-import importlib
-import sys
-import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from Models.schema import JudgeSchema
-
-
-database_module = types.ModuleType("utils.database")
-database_module.Database = Mock()
-with patch.dict(sys.modules, {"utils.database": database_module}):
-    sql_analyst = importlib.import_module("agents.sql_analyst")
+from agents import sql_analyst
 
 
 class SqlAnalystTests(unittest.TestCase):
@@ -60,6 +52,7 @@ class SqlAnalystTests(unittest.TestCase):
         self.assertIn("SELECT DISTINCT payment_method", judge.invoke.call_args.args[0])
         self.assertEqual(result["is_safe"], decision)
         self.assertEqual(result["comments"], "Test decision")
+        self.assertEqual(len(result["messages"]), 2)
         return database, result
 
     def test_approved_query_is_executed(self):
@@ -73,6 +66,21 @@ class SqlAnalystTests(unittest.TestCase):
         database, result = self.run_graph("No")
         database.execute_query.assert_not_called()
         self.assertIn("Query canceled", result["final_answer"])
+
+    def test_empty_question_is_rejected_before_model_call(self):
+        state = SimpleNamespace(user_question="   ")
+        with patch.object(sql_analyst, "pick_llm") as pick:
+            with self.assertRaisesRegex(ValueError, "User question"):
+                sql_analyst.curate_question(state)
+            pick.assert_not_called()
+
+    def test_non_sql_model_response_is_rejected(self):
+        state = SimpleNamespace(prompt_query_context="prompt")
+        llm = Mock()
+        llm.invoke.return_value = SimpleNamespace(content="Hello!")
+        with patch.object(sql_analyst, "pick_llm", return_value=llm):
+            with self.assertRaisesRegex(ValueError, "Only SELECT"):
+                sql_analyst.generate_sql_query(state)
 
 
 if __name__ == "__main__":
